@@ -1,0 +1,44 @@
+[
+  {
+    "action": "goto",
+    "selector": "",
+    "value": "https://badge.shauetech.com/#/home/index",
+    "desc": "打开网页"
+  },
+  {
+    "action": "type",
+    "selector": "input.el-input__inner[placeholder='账号']",
+    "value": "15140786540",
+    "desc": "输入账号"
+  },
+  {
+    "action": "type",
+    "selector": "input.el-input__inner[placeholder='密码']",
+    "value": "654321",
+    "desc": "输入密码"
+  },
+  {
+    "action": "type",
+    "selector": "input.el-input__inner[placeholder='图片验证码']",
+    "value": "654321",
+    "desc": "输入图片验证码"
+  },
+  {
+    "action": "waittime",
+    "selector": "",
+    "value": "1",
+    "desc": "等待操作"
+  },
+  {
+    "action": "click",
+    "selector": "button.el-button.el-button--primary.is-disabled.w-full.!h-14",
+    "value": "",
+    "desc": "点击登录按钮"
+  },
+  {
+    "action": "waittime",
+    "selector": "",
+    "value": "3",
+    "desc": "等待操作"
+  }
+]
