@@ -2,8 +2,14 @@
   {
     "action": "goto",
     "selector": "",
-    "value": "https://badge.shauetech.com/#/home/index",
-    "desc": "打开网页"
+    "value": "https://badge.shauetech.com/#/flow/flowIndex",
+    "desc": "打开销售页面"
+  },
+  {
+    "action": "screenshot",
+    "selector": "",
+    "value": "",
+    "desc": "截图"
   },
   {
     "action": "type",
