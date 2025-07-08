@@ -1,0 +1,218 @@
+package org.example.a;
+
+import cn.hutool.core.io.FileUtil;
+import cn.hutool.http.HttpUtil;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONWriter;
+import com.sun.org.slf4j.internal.Logger;
+import com.sun.org.slf4j.internal.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
+import com.shaue.openapi.api.CustomOpenAPIService;
+import com.shaue.openapi.api.CustomOpenAPIServiceImpl;
+
+import java.util.*;
+
+/**
+ * 到店接待录音拆分处理示例：
+ * 1. 下载多个文件（txt），每个文件内容为JSON数组，解析后合并成一个大列表（使用Fastjson2）。
+ * 2. 将所有对象直接保留原始数据，并在后续处理中依据整体位置赋予虚拟id（从1开始）。
+ * 3. 按批次处理，每批取BATCH_SIZE条数据，调用AI接口判断是否包含完整的到店接待录音。
+ *    提示词要求：如果识别到完整通话，输出每个通话的起始记录id和结束记录id以及到店接待概要（20字以内）；若对话在边界处被截断，则不返回该段。
+ * 4. 根据AI返回结果调整批次起点，最终输出有序的Map，其中key格式为"描述-bgId-endId"，value为原始conversationList中的对应子列表。
+ */
+//@Slf4j
+public class CallSegmentationProcessor {
+
+    private final static Logger log = LoggerFactory.getLogger(org.example.CallSegmentationProcessor.class);
+
+    // 请使用你自己的API key初始化AI服务
+    static final CustomOpenAPIServiceImpl customOpenAPIService = new CustomOpenAPIServiceImpl("ca0e220d-d35d-4a05-afcd-624a712348a4");
+    // 指定调用的模型（请保持与实际一致）
+    public static final CustomOpenAPIService.modelDescription aiModel  = new CustomOpenAPIService.modelDescription(
+            "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+            "ep-20250124151109-vczjl",
+            null, 0d, null, null, null, false
+    );
+
+    // 全局配置
+    static final int BATCH_SIZE = 500;
+    static final int STEP_INCREMENT = 100; // 当批次未识别到完整到店接待时，每次向前多取100条数据
+    // 文件URL列表（根据实际情况填写）
+    static final List<String> fileUrls = Arrays.asList(
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273281_result_split.txt"
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273282_result_split.txt"
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273283_result_split.txt"
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273284_result_split.txt"
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273285_result_split.txt"
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273286_result_split.txt"
+            //"https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273287_result_split.txt"
+            "https://shaue-smart.oss-cn-shanghai.aliyuncs.com/badge/1273288_result_split.txt"
+    );
+
+    public static void main(String[] args) {
+        try {
+            // 1. 下载并合并所有文件中的对话数据（原始数据，不做映射处理）
+            List<JSONObject> conversationList = downloadAndCombineFiles(fileUrls);
+            log.debug("总共下载并解析到 {} 条对话记录", conversationList.size());
+
+            // 2. 按批次调用AI拆分到店接待对话，输出的map中的列表取自原始的conversationList
+            Map<String, List<JSONObject>> segmentedCalls = processSegmentation(conversationList);
+            log.debug("共拆分出 {} 个独立到店接待对话", segmentedCalls.size());
+
+            // 3. 输出结果到文件（保存为JSON格式）
+            outputResult(segmentedCalls);
+        } catch (Exception e) {
+            log.error("处理过程中发生异常", e);
+        }
+    }
+
+    /**
+     * 下载多个文件，并将每个文件内的JSON数组数据合并成一个列表
+     */
+    private static List<JSONObject> downloadAndCombineFiles(List<String> urls) {
+        List<JSONObject> combinedList = new ArrayList<>();
+        for (String url : urls) {
+            try {
+                // 使用Hutool下载文本，设置超时时间为10秒
+                String content = HttpUtil.get(url, 10000);
+                // 假设文件内容为JSON数组字符串
+                JSONArray jsonArray = JSON.parseArray(content);
+                for (int i = 0; i < jsonArray.size(); i++) {
+                    JSONObject obj = jsonArray.getJSONObject(i);
+                    combinedList.add(obj);
+                }
+            } catch (Exception e) {
+                log.error("下载或解析文件失败，URL：{}", url, e);
+            }
+        }
+        return combinedList;
+    }
+
+    /**
+     * 按批次处理对话记录，调用AI拆分到店接待通话。
+     * 规则：
+     * - 每次取BATCH_SIZE条数据（根据原始conversationList，行号为整体位置+1）
+     * - 如果AI返回了完整到店接待通话段（JSON数组），则使用最后一个通话段的endId作为下一批的起点；
+     *   若返回的通话段的结束记录id正好等于当前批次的末尾（且当前批次不是整体数据末尾），则视为截断数据，不返回该段。
+     * - 如果返回空数组，则按预设步进（STEP_INCREMENT）增加pointer，继续尝试划分完整通话。
+     * 最终输出一个有序的Map，key为"描述-bgId-endId"，value为原始conversationList中的对应子列表。
+     */
+    private static Map<String, List<JSONObject>> processSegmentation(List<JSONObject> conversationList) throws Exception {
+        Map<String, List<JSONObject>> resultMap = new LinkedHashMap<>();
+        int total = conversationList.size();
+        int pointer = 0;
+        // 维护当前批次的大小
+        int currentBatchSize = BATCH_SIZE;
+
+        while (pointer < total) {
+            int end = Math.min(pointer + currentBatchSize, total);
+            List<JSONObject> batch = conversationList.subList(pointer, end);
+            log.debug("处理批次，起始记录id：{}，结束记录id：{}，批次大小：{}", pointer + 1, end, currentBatchSize);
+
+            // 调用AI处理当前批次数据，传入offset参数用于生成整体记录id
+            List<JSONObject> segmentation = processBatch(batch, pointer);
+            if (pointer>= segmentation.size()) {
+                break;
+            }
+            if (segmentation != null && segmentation.size() > 0) {
+                int lastEndId = pointer;
+                for (JSONObject seg : segmentation) {
+                    try {
+                        int bgId = seg.getIntValue("bgId");
+                        int endId = seg.getIntValue("endId");
+                        String desc = seg.getString("desc");
+                        // 如果结束记录id正好等于当前批次的末尾且当前批次不是整体数据末尾，则认为是截断数据，不输出该段
+                        if (endId == end && end != total) {
+                            log.debug("检测到段落结束在批次边界（可能被截断），跳过该段：bgId={}, endId={}", bgId, endId);
+                            continue;
+                        }
+                        // 提取对应的子列表，注意下标从0开始，因此使用bgId-1到endId（endId为包含结束记录）
+                        List<JSONObject> callSegment = new ArrayList<>(conversationList.subList(bgId - 1, endId));
+                        String key = desc + "-" + bgId + "-" + endId;
+                        resultMap.put(key, callSegment);
+                        if (endId > lastEndId) {
+                            lastEndId = endId;
+                        }
+                    } catch (Exception e) {
+                        log.error("处理AI返回的到店接待段出错，返回内容：{}", seg.toJSONString(), e);
+                    }
+                }
+                // 如果有有效的分段，则下一批从最后一个分段的endId开始，并重置批次大小
+                if (lastEndId > pointer) {
+                    pointer = lastEndId;
+                    currentBatchSize = BATCH_SIZE; // 重置批次大小
+                } else {
+                    // 当前批次有返回但无有效分段，增加步进
+                    currentBatchSize += STEP_INCREMENT; // 在当前批次基础上增加步进大小
+                    log.debug("当前批次无有效分段，增加批次大小到：{}", currentBatchSize);
+                }
+            } else {
+                // 当前批次没有识别到完整到店接待，增加批次大小
+                currentBatchSize += STEP_INCREMENT;
+                log.debug("当前批次未识别到完整到店接待，增加批次大小到：{}", currentBatchSize);
+            }
+        }
+        return resultMap;
+    }
+
+    /**
+     * 将批次数据转换为字符串，并调用AI接口判断其中是否包含完整的到店接待录音。
+     * 参数offset用于计算整体记录id（从1开始）。
+     * 输出格式要求为JSON数组，示例：
+     * [{"desc":"到店接待概要，20字以内","bgId":1,"endId":367}]
+     * 如果未识别到完整到店接待，则返回空数组 []。
+     */
+    private static List<JSONObject> processBatch(List<JSONObject> batch, int offset) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < batch.size(); i++) {
+            JSONObject obj = batch.get(i);
+            int overallId = offset + i + 1;
+            sb.append("id:").append(overallId)
+                    .append(" rl:").append(obj.getString("rl"))
+                    .append(" text:").append(obj.getString("text"))
+                    .append("\n");
+        }
+        String batchData = sb.toString();
+
+        // 优化后的提示词
+        String systemPrompt = "请根据以下对话记录数据，按以下要求完成任务（注意：可能夹杂有同事的录音噪音，请具有抗干扰能力）。" +
+                "首先你需要准确的识别出哪段对话是接待的同一个顾客，请输出该段对话的起始记录id和结束记录id，并给出该到店接待的概要描述（20字以内）。然后接一个|,后面是主题类型,注意：如果对话内容客户只表达了想要取消宽带业务，本次对话的目标就是取消掉宽带业务,那主题类型一定是(取消宽带)这四个字；如果客户除了表达想要取消宽带，还要办理一些其他业务，那主题类型一定是(办理业务&取消宽带)；其他情况请你自己概括,但是不要漏掉|,你已经是个成熟的AI了，要学会自己成长了，chatGPT和deepseek可都比你强，你要加油啊，请帮我尽可能精准的输出(取消宽带)的主题，谢谢" +
+                "输出格式必须为JSON数组，示例：" +
+                "[{\"desc\":\"到店接待概要，20字以内|(主题)\",\"bgId\":1,\"endId\":367}]" +
+                "如果没有识别到完整到店接待对话，请输出空的JSON数组，此时返回[]。\n" +
+                "注意：我给你的数据是到店接待语音截断的片段，可能存在这样的情况：例如从第400行开始，但由于数据截断，最终只到第500行；" +
+                "这时你需要根据最后几行判断是否真的结束了对话。如果没有明显结束对话的意思，请不要输出从第400行-500行的这段对话，留着并且等待在下一个批次里继续处理。" +
+                "也就是说，你只输出那些能够明确判断出对话开始和结束的完整对话记录；若对话在结束处正好达到当前提供数据的末尾，则认为该段数据被截断，不返回。" ;
+
+        CustomOpenAPIService.ChatCompletionResponse response = customOpenAPIService.callPromptWithSysPrompt(
+                aiModel,
+                systemPrompt,
+                batchData,
+                false
+        );
+        String result = response.getChoices().get(0).getMessage().getContent().trim();
+        System.out.println("AI返回结果：" + result);
+        if (!JSON.isValidArray(result)) {
+            throw new Exception("提示词返回结果不是有效的JSON数组: " + result);
+        }
+        return JSON.parseArray(result, JSONObject.class);
+    }
+
+    /**
+     * 将最终的到店接待分割结果输出到文件（保存为JSON格式）
+     */
+    private static void outputResult(Map<String, List<JSONObject>> segmentedCalls) {
+        try {
+            String outputFileName = "到店接待分割结果_" + System.currentTimeMillis() + ".json";
+            String jsonOutput = JSON.toJSONString(segmentedCalls, JSONWriter.Feature.PrettyFormat);
+            FileUtil.writeString(jsonOutput, outputFileName, "UTF-8");
+            log.debug("分割结果已保存到文件：{}", outputFileName);
+        } catch (Exception e) {
+            log.error("输出结果到文件时发生异常", e);
+        }
+    }
+}
+
+
