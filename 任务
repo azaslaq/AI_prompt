@@ -6,45 +6,99 @@
     "desc": "打开销售页面"
   },
   {
-    "action": "screenshot",
-    "selector": "",
-    "value": "",
-    "desc": "截图"
-  },
-  {
-    "action": "type",
-    "selector": "input.el-input__inner[placeholder='账号']",
-    "value": "15140786540",
-    "desc": "输入账号"
-  },
-  {
-    "action": "type",
-    "selector": "input.el-input__inner[placeholder='密码']",
-    "value": "654321",
-    "desc": "输入密码"
-  },
-  {
-    "action": "type",
-    "selector": "input.el-input__inner[placeholder='图片验证码']",
-    "value": "654321",
-    "desc": "输入图片验证码"
-  },
-  {
     "action": "waittime",
     "selector": "",
-    "value": "1",
+    "value": "2",
     "desc": "等待操作"
   },
   {
     "action": "click",
-    "selector": "button.el-button.el-button--primary.is-disabled.w-full.!h-14",
+    "selector": "div#tab-2605.el-tabs__item.is-top",
     "value": "",
-    "desc": "点击登录按钮"
+    "desc": "点击到店咨询"
   },
   {
     "action": "waittime",
     "selector": "",
     "value": "3",
     "desc": "等待操作"
+  },
+  {
+    "action": "screenshot",
+    "selector": "",
+    "value": "",
+    "desc": "截图"
+  },
+  {
+    "action": "click",
+    "selector": "div#tab-2606.el-tabs__item.is-top",
+    "value": "",
+    "desc": "点击电话外呼"
+  },
+  {
+    "action": "waittime",
+    "selector": "",
+    "value": "3",
+    "desc": "等待操作"
+  },
+  {
+    "action": "screenshot",
+    "selector": "",
+    "value": "",
+    "desc": "截图"
+  },
+  {
+    "action": "click",
+    "selector": "div#tab-2625.el-tabs__item.is-top",
+    "value": "",
+    "desc": "点击试乘试驾"
+  },
+  {
+    "action": "waittime",
+    "selector": "",
+    "value": "3",
+    "desc": "等待操作"
+  },
+  {
+    "action": "screenshot",
+    "selector": "",
+    "value": "",
+    "desc": "截图"
+  },
+  {
+    "action": "click",
+    "selector": "div#tab-2727.el-tabs__item.is-top",
+    "value": "",
+    "desc": "点击保险咨询"
+  },
+  {
+    "action": "waittime",
+    "selector": "",
+    "value": "3",
+    "desc": "等待操作"
+  },
+  {
+    "action": "screenshot",
+    "selector": "",
+    "value": "",
+    "desc": "截图"
+  },
+  {
+    "action": "click",
+    "selector": "div#tab-2728.el-tabs__item.is-top",
+    "value": "",
+    "desc": "点击售后保养"
+  },
+  {
+    "action": "waittime",
+    "selector": "",
+    "value": "3",
+    "desc": "等待操作"
+  },
+  {
+    "action": "screenshot",
+    "selector": "",
+    "value": "",
+    "desc": "截图"
   }
 ]
