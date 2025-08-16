@@ -32,7 +32,7 @@
   {
     "action": "waittime",
     "selector": "",
-    "value": "1",
+    "value": "2",
     "desc": "等待操作"
   },
   {
